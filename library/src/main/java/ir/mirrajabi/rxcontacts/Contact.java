@@ -17,6 +17,7 @@ package ir.mirrajabi.rxcontacts;
 
 
 import android.net.Uri;
+import android.support.annotation.NonNull;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -28,7 +29,8 @@ import java.util.Set;
  * @author MADNESS
  */
 
-public class Contact implements Comparable<Contact> {
+public class Contact implements Comparable<Contact>  {
+
     private final long mId;
     private int mInVisibleGroup;
     private String mDisplayName;
@@ -104,7 +106,7 @@ public class Contact implements Comparable<Contact> {
 
 
     @Override
-    public int compareTo(Contact other) {
+    public int compareTo(@NonNull Contact other) {
         if(mDisplayName != null && other.mDisplayName != null)
             return mDisplayName.compareTo(other.mDisplayName);
         else return -1;

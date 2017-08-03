@@ -38,6 +38,7 @@ import static ir.mirrajabi.rxcontacts.ColumnMapper.mapThumbnail;
 
 /**
  * Android contacts as rx observable.
+ *
  * @author Ulrich Raab
  * @author MADNESS
  */
@@ -55,7 +56,11 @@ public class RxContacts {
 
     private ContentResolver mResolver;
 
-    public static Observable<Contact> fetch (@NonNull final Context context) {
+    private RxContacts(@NonNull Context context) {
+        mResolver = context.getContentResolver();
+    }
+
+    public static Observable<Contact> fetch(@NonNull final Context context) {
         return Observable.create(new ObservableOnSubscribe<Contact>() {
             @Override
             public void subscribe(@io.reactivex.annotations.NonNull
@@ -65,15 +70,9 @@ public class RxContacts {
         });
     }
 
-    private RxContacts(@NonNull Context context) {
-        mResolver = context.getContentResolver();
-    }
-
-
-    private void fetch (ObservableEmitter emitter) {
+    private void fetch(ObservableEmitter<Contact> emitter) {
         LongSparseArray<Contact> contacts = new LongSparseArray<>();
         Cursor cursor = createCursor();
-        cursor.moveToFirst();
         int idColumnIndex = cursor.getColumnIndex(ContactsContract.Data.CONTACT_ID);
         int inVisibleGroupColumnIndex = cursor.getColumnIndex(ContactsContract.Data.IN_VISIBLE_GROUP);
         int displayNamePrimaryColumnIndex = cursor.getColumnIndex(ContactsContract.Data.DISPLAY_NAME_PRIMARY);
@@ -82,7 +81,7 @@ public class RxContacts {
         int thumbnailColumnIndex = cursor.getColumnIndex(ContactsContract.Data.PHOTO_THUMBNAIL_URI);
         int mimetypeColumnIndex = cursor.getColumnIndex(ContactsContract.Data.MIMETYPE);
         int dataColumnIndex = cursor.getColumnIndex(ContactsContract.Data.DATA1);
-        while (!cursor.isAfterLast()) {
+        while (cursor.moveToNext()) {
             long id = cursor.getLong(idColumnIndex);
             Contact contact = contacts.get(id, null);
             if (contact == null) {
@@ -93,6 +92,7 @@ public class RxContacts {
                 mapPhoto(cursor, contact, photoColumnIndex);
                 mapThumbnail(cursor, contact, thumbnailColumnIndex);
                 contacts.put(id, contact);
+                emitter.onNext(contact);
             } else {
                 String mimetype = cursor.getString(mimetypeColumnIndex);
                 switch (mimetype) {
@@ -106,21 +106,19 @@ public class RxContacts {
                     }
                 }
             }
-            cursor.moveToNext();
+
         }
         cursor.close();
-        for (int i = 0; i < contacts.size(); i++)
-            emitter.onNext(contacts.valueAt(i));
         emitter.onComplete();
     }
 
-    private Cursor createCursor () {
+    private Cursor createCursor() {
         return mResolver.query(
                 ContactsContract.Data.CONTENT_URI,
                 PROJECTION,
                 null,
                 null,
-                ContactsContract.Data.CONTACT_ID
+                ContactsContract.Data.DISPLAY_NAME
         );
     }
 }
