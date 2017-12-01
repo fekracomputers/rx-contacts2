@@ -42,83 +42,104 @@ import static ir.mirrajabi.rxcontacts.ColumnMapper.mapThumbnail;
  * @author Ulrich Raab
  * @author MADNESS
  */
-public class RxContacts {
-    private static final String[] PROJECTION = {
-            ContactsContract.Data.CONTACT_ID,
-            ContactsContract.Data.DISPLAY_NAME_PRIMARY,
-            ContactsContract.Data.STARRED,
-            ContactsContract.Data.PHOTO_URI,
-            ContactsContract.Data.PHOTO_THUMBNAIL_URI,
-            ContactsContract.Data.DATA1,
-            ContactsContract.Data.MIMETYPE,
-            ContactsContract.Data.IN_VISIBLE_GROUP
-    };
+ public static class RxContacts {
+     private static final String[] PROJECTION = {
+             ContactsContract.Data.CONTACT_ID,
+             ContactsContract.Data.DISPLAY_NAME_PRIMARY,
+             ContactsContract.Data.STARRED,
+             ContactsContract.Contacts.HAS_PHONE_NUMBER,
+             ContactsContract.Data.PHOTO_URI,
+             ContactsContract.Data.PHOTO_THUMBNAIL_URI,
+             ContactsContract.Data.DATA1,
+             ContactsContract.Data.MIMETYPE,
+             ContactsContract.Data.IN_VISIBLE_GROUP
+     };
 
-    private ContentResolver mResolver;
+     private ContentResolver mResolver;
+     private Context context;
+     private RxContacts(@NonNull Context context) {
+         mResolver = context.getContentResolver();
+         this.context = context;
+     }
 
-    private RxContacts(@NonNull Context context) {
-        mResolver = context.getContentResolver();
-    }
+     public static Observable<Contact> fetch(@NonNull final Context context) {
+         return Observable.create(new ObservableOnSubscribe<Contact>() {
+             @Override
+             public void subscribe(ObservableEmitter<Contact> e) throws Exception {
+                 new RxContacts(context).fetch(e);
+             }
+         });
+     }
 
-    public static Observable<Contact> fetch(@NonNull final Context context) {
-        return Observable.create(new ObservableOnSubscribe<Contact>() {
-            @Override
-            public void subscribe(@io.reactivex.annotations.NonNull
-                                          ObservableEmitter<Contact> e) throws Exception {
-                new RxContacts(context).fetch(e);
-            }
-        });
-    }
 
-    private void fetch(ObservableEmitter<Contact> emitter) {
-        LongSparseArray<Contact> contacts = new LongSparseArray<>();
-        Cursor cursor = createCursor();
-        int idColumnIndex = cursor.getColumnIndex(ContactsContract.Data.CONTACT_ID);
-        int inVisibleGroupColumnIndex = cursor.getColumnIndex(ContactsContract.Data.IN_VISIBLE_GROUP);
-        int displayNamePrimaryColumnIndex = cursor.getColumnIndex(ContactsContract.Data.DISPLAY_NAME_PRIMARY);
-        int starredColumnIndex = cursor.getColumnIndex(ContactsContract.Data.STARRED);
-        int photoColumnIndex = cursor.getColumnIndex(ContactsContract.Data.PHOTO_URI);
-        int thumbnailColumnIndex = cursor.getColumnIndex(ContactsContract.Data.PHOTO_THUMBNAIL_URI);
-        int mimetypeColumnIndex = cursor.getColumnIndex(ContactsContract.Data.MIMETYPE);
-        int dataColumnIndex = cursor.getColumnIndex(ContactsContract.Data.DATA1);
-        while (cursor.moveToNext()) {
-            long id = cursor.getLong(idColumnIndex);
-            Contact contact = contacts.get(id, null);
-            if (contact == null) {
-                contact = new Contact(id);
-                mapInVisibleGroup(cursor, contact, inVisibleGroupColumnIndex);
-                mapDisplayName(cursor, contact, displayNamePrimaryColumnIndex);
-                mapStarred(cursor, contact, starredColumnIndex);
-                mapPhoto(cursor, contact, photoColumnIndex);
-                mapThumbnail(cursor, contact, thumbnailColumnIndex);
-                contacts.put(id, contact);
-                emitter.onNext(contact);
-            } else {
-                String mimetype = cursor.getString(mimetypeColumnIndex);
-                switch (mimetype) {
-                    case ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE: {
-                        mapEmail(cursor, contact, dataColumnIndex);
-                        break;
-                    }
-                    case ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE: {
-                        mapPhoneNumber(cursor, contact, dataColumnIndex);
-                        break;
-                    }
-                }
-            }
 
-        }
-        cursor.close();
-        emitter.onComplete();
-    }
 
-    private Cursor createCursor() {
-        return mResolver.query(
-                ContactsContract.Data.CONTENT_URI,
-                PROJECTION,
-                null,
-                null,
-                ContactsContract.Data.DISPLAY_NAME
-        );
-    }
-}
+     private void fetch(ObservableEmitter<Contact> emitter) {
+         String countryCode = PreferenceUtility.open(context).getCountryCode();
+
+         LongSparseArray<Contact> contacts = new LongSparseArray<>();
+         Cursor cur = mResolver.query(ContactsContract.Contacts.CONTENT_URI,
+                 null, null, null, null);
+         if (cur != null && cur.getCount() > 0) {
+             while (cur.moveToNext()) {
+                 String id = cur.getString(cur.getColumnIndex(ContactsContract.Contacts._ID));
+                 String name = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
+
+                 String photo = cur.getString(cur.getColumnIndex(ContactsContract.Data.PHOTO_URI));
+                 if (cur.getInt(cur.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER)) > 0) {
+
+                     Cursor pCur = mResolver.query(
+                             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                             null,
+                             ContactsContract.CommonDataKinds.Phone.CONTACT_ID +" = ?",
+                             new String[]{id}, null);
+                     String [] emails = null;
+                     int index = 0;
+                     while (pCur != null && pCur.getCount() > 0 && pCur.moveToNext()) {
+                         if (emails == null) emails = new String[pCur.getCount()];
+                         String email = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS));
+                         emails[index] = email;
+                         index ++ ;
+                     }
+
+
+                     if (pCur != null) pCur.moveToFirst();
+                     boolean isFirstTime = true;
+                     while (pCur != null && pCur.getCount() > 0 && (isFirstTime || pCur.moveToNext())) {
+                         isFirstTime = false;
+                         String phoneNo = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
+
+                         phoneNo = Utility.cleanPhone(countryCode, phoneNo);
+
+                         Contact contact = new Contact(Long.valueOf(id));
+                         contact.setEmails(emails);
+                         contact.setPhoneNumber(phoneNo);
+                         contact.setDisplayName(name);
+                         if (photo != null && !photo.isEmpty())
+                             contact.setPhoto(Uri.parse(photo));
+                         contacts.put(Long.valueOf(id), contact);
+                         emitter.onNext(contact);
+
+                     }
+                     if (pCur != null) pCur.close();
+                 }
+             }
+             cur.close();
+             emitter.onComplete();
+         } else if (cur != null)
+             cur.close();
+     }
+
+
+
+
+     private Cursor createCursor() {
+         return mResolver.query(
+                 ContactsContract.Data.CONTENT_URI,
+                 PROJECTION,
+                 null,
+                 null,
+                 ContactsContract.Data.DISPLAY_NAME
+         );
+     }
+ }
